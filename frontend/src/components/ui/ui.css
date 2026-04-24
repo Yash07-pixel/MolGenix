@@ -1,0 +1,217 @@
+.mgx-button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  gap: var(--space-2);
+  justify-content: center;
+  padding: 0 12px;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  white-space: nowrap;
+}
+
+.mgx-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mgx-button--sm {
+  height: 28px;
+}
+
+.mgx-button--md {
+  height: 34px;
+}
+
+.mgx-button--lg {
+  height: 40px;
+}
+
+.mgx-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.mgx-button--primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.mgx-button--secondary {
+  background: #ffffff;
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.mgx-button--secondary:hover:not(:disabled) {
+  background: var(--bg-subtle);
+}
+
+.mgx-button--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.mgx-button--ghost:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.mgx-button--destructive {
+  background: var(--red-bg);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.mgx-button--destructive:hover:not(:disabled) {
+  background: #fde7e7;
+}
+
+.mgx-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.mgx-badge {
+  border-radius: 3px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  text-transform: uppercase;
+}
+
+.mgx-badge--success {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.mgx-badge--warning {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+
+.mgx-badge--danger {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.mgx-badge--neutral {
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+
+.mgx-badge--info {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.mgx-input,
+.mgx-textarea {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  width: 100%;
+}
+
+.mgx-input {
+  height: 36px;
+  padding: 0 12px;
+}
+
+.mgx-textarea {
+  min-height: 80px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.mgx-input:focus,
+.mgx-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.1);
+  outline: none;
+}
+
+.mgx-input:disabled,
+.mgx-textarea:disabled {
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
+}
+
+.mgx-spinner {
+  animation: mgx-spin 600ms linear infinite;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  border-top-color: var(--accent);
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.mgx-divider {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--space-6) 0;
+}
+
+.mgx-tooltip {
+  display: inline-flex;
+  position: relative;
+}
+
+.mgx-tooltip__trigger {
+  display: inline-flex;
+}
+
+.mgx-tooltip__content {
+  background: var(--bg-inverse);
+  border-radius: 4px;
+  color: var(--text-inverse);
+  font-size: 12px;
+  left: 50%;
+  opacity: 0;
+  padding: 4px 8px;
+  pointer-events: none;
+  position: absolute;
+  top: calc(-100% - 10px);
+  transform: translateX(-50%) translateY(4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  white-space: nowrap;
+}
+
+.mgx-tooltip:hover .mgx-tooltip__content,
+.mgx-tooltip:focus-within .mgx-tooltip__content {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.mgx-skeleton {
+  animation: mgx-shimmer 1.4s infinite;
+  background: linear-gradient(90deg, var(--bg-subtle) 25%, var(--border) 50%, var(--bg-subtle) 75%);
+  background-size: 800px 100%;
+  display: inline-block;
+}
+
+@keyframes mgx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes mgx-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}

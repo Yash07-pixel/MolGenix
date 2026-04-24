@@ -1,0 +1,1 @@
+"""MolGenix FastAPI Application"""
