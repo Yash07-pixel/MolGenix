@@ -1,7 +1,7 @@
 """
 Molecule Model - Represents a generated drug candidate molecule
 """
-from sqlalchemy import Column, String, Float, Boolean, JSON, ForeignKey, UUID
+from sqlalchemy import Column, String, Float, Boolean, Integer, JSON, ForeignKey, UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
 
@@ -17,6 +17,11 @@ class Molecule(BaseModel):
     
     target_id = Column(UUID(as_uuid=True), ForeignKey("targets.id", ondelete="CASCADE"), nullable=False, index=True)
     smiles = Column(String(2048), nullable=False, index=True)
+    molecular_weight = Column(Float, nullable=True)
+    logp = Column(Float, nullable=True)
+    tpsa = Column(Float, nullable=True)
+    rotatable_bonds = Column(Integer, nullable=True)
+    smiles_valid = Column(Boolean, nullable=False, default=True)
     lipinski_pass = Column(Boolean, default=False, nullable=False)
     sas_score = Column(Float, nullable=True)  # Synthetic Accessibility Score (0-10, lower is better)
     admet_scores = Column(JSON, nullable=True)  # Dict of ADMET predictions: {hepatotoxicity, herg, bbbp, bioavailability}

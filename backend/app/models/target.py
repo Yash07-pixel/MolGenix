@@ -19,6 +19,7 @@ class Target(BaseModel):
     uniprot_id = Column(String(20), nullable=True, unique=True, index=True)
     druggability_score = Column(Float, nullable=True)
     chembl_id = Column(String(64), nullable=True)
+    target_class = Column(String(64), nullable=True)
     disease = Column(String(256), nullable=True)
     pdb_id = Column(String(32), nullable=True)
     known_inhibitors = Column(JSON, nullable=True)

@@ -41,6 +41,57 @@ class TargetEnrichmentService:
     """Service for enriching drug discovery targets with multi-source data."""
 
     @staticmethod
+    def classify_target(
+        protein_name: str,
+        gene_symbol: str,
+        uniprot_id: str,
+        chembl_id: str,
+    ) -> str:
+        """
+        Returns one of: kinase, protease, gpcr, nuclear_receptor,
+                        ion_channel, phosphatase, cox, oxidase, other
+        Uses multiple signals to classify correctly.
+        """
+        text = (f"{protein_name} {gene_symbol}").lower()
+        gene = (gene_symbol or "").upper()
+
+        KINASE_GENES = {
+            "EGFR", "ERBB2", "ABL1", "SRC", "BRAF", "VEGFR", "KIT",
+            "ALK", "MET", "RET", "JAK1", "JAK2", "CDK4", "CDK6",
+            "AURKA", "AURKB", "PLK1", "CHEK1", "ATM", "ATR",
+        }
+        PROTEASE_GENES = {
+            "BACE1", "BACE2", "ADAM10", "MMP2", "MMP9", "CASP3",
+            "CASP7", "CASP9", "FURIN", "TMPRSS2", "ACE", "ACE2",
+            "RENIN", "DPP4", "FAP", "PREP",
+        }
+        GPCR_GENES = {
+            "DRD2", "DRD3", "HTR2A", "ADRB1", "ADRB2", "CHRM1",
+            "CXCR4", "CCR5", "ADORA2A", "CNR1", "CNR2", "OPRM1",
+        }
+        COX_GENES = {"PTGS1", "PTGS2", "COX1", "COX2"}
+
+        if gene in KINASE_GENES or "kinase" in text:
+            return "kinase"
+        if gene in PROTEASE_GENES or any(x in text for x in ["protease", "secretase", "peptidase", "convertase"]):
+            return "protease"
+        if gene in GPCR_GENES or any(x in text for x in ["gpcr", "g-protein", "g protein", "receptor coupled"]):
+            return "gpcr"
+        if gene in COX_GENES or "cyclooxygenase" in text:
+            return "cox"
+        if any(x in text for x in ["nuclear receptor", "steroid", "thyroid receptor"]):
+            return "nuclear_receptor"
+        if any(x in text for x in ["ion channel", "sodium channel", "potassium channel"]):
+            return "ion_channel"
+        if "phosphatase" in text:
+            return "phosphatase"
+        if "oxidase" in text:
+            return "oxidase"
+
+        logger.warning("Unknown target class for gene=%s, name=%s", gene_symbol, protein_name)
+        return "other"
+
+    @staticmethod
     def _normalize_text(value: Any) -> str:
         return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
@@ -173,6 +224,12 @@ class TargetEnrichmentService:
         target.uniprot_id = candidate_uniprot_id or target.uniprot_id
         target.druggability_score = druggability_score
         target.chembl_id = chembl_result.get("chembl_id")
+        target.target_class = TargetEnrichmentService.classify_target(
+            candidate_name or target.name or "",
+            gemini_data.get("gene_symbol", "") or "",
+            candidate_uniprot_id or "",
+            chembl_result.get("chembl_id", "") or "",
+        )
         target.known_inhibitors = chembl_result.get("known_inhibitors", 0)
         target.organism = uniprot_result.get("organism", "")
         target.function = uniprot_result.get("function", "")

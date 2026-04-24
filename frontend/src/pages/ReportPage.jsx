@@ -314,21 +314,25 @@ function ReportPage() {
         <div className="report-stat">
           <strong>{runMolecules.length}</strong>
           <span>Candidates Generated</span>
+          <em className="report-stat__trend">Library size</em>
         </div>
         <div className="report-stat__divider" />
         <div className="report-stat">
           <strong>{lipinskiPassRate}%</strong>
           <span>Lipinski Pass Rate</span>
+          <em className="report-stat__trend">Developability</em>
         </div>
         <div className="report-stat__divider" />
         <div className="report-stat">
           <strong>{topLead?.docking_score !== undefined && topLead?.docking_score !== null ? `${topLead.docking_score} kcal/mol` : '-'}</strong>
           <span>Best Docking Score</span>
+          <em className="report-stat__trend">Binding estimate</em>
         </div>
         <div className="report-stat__divider" />
         <div className="report-stat">
           <strong>{countGreenFlags(topLead?.admet_scores)}/4</strong>
           <span>ADMET Green Flags</span>
+          <em className="report-stat__trend">Safety profile</em>
         </div>
       </section>
 
@@ -424,15 +428,11 @@ function ReportPage() {
 
             <p className="report-sub-label">Docking Performance</p>
             <div className="report-docking-block">
-              <div>
-                <span>Reference compound</span>
-                <strong>-6.2 kcal/mol</strong>
-              </div>
               <div className="report-docking-block__current">
-                <span>This compound</span>
+                <span>Docking score</span>
                 <strong>{topLead?.docking_score ?? '-'} kcal/mol</strong>
               </div>
-              <p>{dockingDeltaText(topLead?.docking_score)}</p>
+              <p>{dockingSummaryText(topLead?.docking_score)}</p>
             </div>
 
             <Divider />
@@ -587,12 +587,17 @@ function makeProfileRow(label, score, traffic) {
   }
 }
 
-function dockingDeltaText(score) {
+function dockingSummaryText(score) {
   if (score === null || score === undefined) {
-    return 'Docking delta unavailable'
+    return 'Docking score unavailable'
   }
-  const delta = Math.abs(score - -6.2).toFixed(1)
-  return `+${delta} kcal/mol stronger binding`
+  if (score < -7) {
+    return 'Strong predicted binding in the current docking run'
+  }
+  if (score <= -5) {
+    return 'Moderate predicted binding in the current docking run'
+  }
+  return 'Weak or uncertain predicted binding in the current docking run'
 }
 
 function deltaMetric(original, optimized, lowerIsBetter) {

@@ -30,6 +30,7 @@ except ImportError:
 
 from app.models.molecule import Molecule
 from app.models.target import Target
+from app.models.target_context import TargetContext
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -51,16 +52,63 @@ FRAGMENT_LIBRARY = [
     'c1ccc(O)cc1',     # Phenol
 ]
 
-EGFR_EMERGENCY_SEEDS: Tuple[str, ...] = (
-    "CN1C=NC2=C1C(=O)N(C(=O)N2C)C",
-    "C1=CC=C2C(=C1)C=CC(=O)O2",
-)
+TARGET_CLASS_FALLBACK_SEEDS: Dict[str, Tuple[str, ...]] = {
+    "kinase": (
+        "c1ccc2[nH]ccc2c1",
+        "Cc1ccc(NC(=O)c2ccc(CN3CCN(C)CC3)cc2)cc1Nc1nccc(-c2cccnc2)n1",
+    ),
+    "protease": (
+        "CC(C)CC(NC(=O)OC(C)(C)C)C(=O)O",
+        "O=C(O)c1ccccc1NC(=O)c1ccccc1",
+    ),
+    "cox": (
+        "CCOc1ccc(-c2cc(=O)c3c(o2)-c2ccccc2OCC3)cc1",
+        "O=C(O)c1ccc(Cl)cc1",
+    ),
+    "generic": (
+        "c1ccc2c(c1)ccc(=O)o2",
+        "CC(=O)Oc1ccccc1C(=O)O",
+    ),
+}
 
-GENERIC_EMERGENCY_SEEDS: Tuple[str, ...] = (
-    "c1ccc2c(c1)ccc(=O)o2",
-    "CC(=O)Oc1ccccc1C(=O)O",
-    "c1ccc(cc1)N",
-)
+
+def build_target_profile(target_context: TargetContext) -> dict:
+    # Determine target class from gene symbol or protein name
+    name_lower = (target_context.protein_name + target_context.gene_symbol).lower()
+
+    if any(x in name_lower for x in ["kinase", "egfr", "vegfr", "abl", "src"]):
+        target_class = "kinase"
+        mw_range = (300, 550)
+        preferred_hbd = 3
+        preferred_logp = (2, 5)
+    elif any(x in name_lower for x in ["protease", "bace", "hiv", "thrombin", "factor"]):
+        target_class = "protease"
+        mw_range = (300, 600)
+        preferred_hbd = 4
+        preferred_logp = (1, 4)
+    elif any(x in name_lower for x in ["cox", "cyclooxygenase", "ptgs"]):
+        target_class = "cox"
+        mw_range = (250, 500)
+        preferred_hbd = 2
+        preferred_logp = (3, 6)
+    elif any(x in name_lower for x in ["gpcr", "receptor", "adrenergic", "dopamine"]):
+        target_class = "gpcr"
+        mw_range = (250, 500)
+        preferred_hbd = 2
+        preferred_logp = (2, 5)
+    else:
+        target_class = "generic"
+        mw_range = (200, 500)
+        preferred_hbd = 5
+        preferred_logp = (0, 5)
+
+    target_context.target_class = target_class
+    return {
+        "target_class": target_class,
+        "mw_range": mw_range,
+        "preferred_hbd": preferred_hbd,
+        "preferred_logp": preferred_logp,
+    }
 
 
 @dataclass(frozen=True)
@@ -198,6 +246,38 @@ class MoleculeGenerationService:
         return None
 
     @staticmethod
+    def _profile_for_target_context(target_context: TargetContext) -> Optional[TargetGenerationProfile]:
+        """Build a dynamic target-aware profile from a shared target context."""
+        profile = build_target_profile(target_context)
+        target_class = profile["target_class"]
+        mw_low, mw_high = profile["mw_range"]
+        logp_low, logp_high = profile["preferred_logp"]
+        inhibitor_type_map = {
+            "kinase": "kinase-focused small molecule",
+            "protease": "protease-focused inhibitor",
+            "cox": "cyclooxygenase-focused inhibitor",
+            "gpcr": "gpcr-focused ligand",
+            "generic": "generic drug-like ligand",
+        }
+        min_hba = max(2, profile["preferred_hbd"] + 1)
+        min_aromatic = 2 if target_class in {"kinase", "cox", "gpcr"} else 1
+        max_rotatable = 10 if target_class in {"kinase", "gpcr", "generic"} else 12
+        min_quick_binding = -6.8 if target_class in {"kinase", "protease", "cox"} else -6.0
+        return TargetGenerationProfile(
+            key=target_class.upper(),
+            inhibitor_type=inhibitor_type_map.get(target_class, "generic drug-like ligand"),
+            aliases=(target_context.gene_symbol.lower(), target_context.protein_name.lower()),
+            preferred_mw=(float(mw_low), float(mw_high)),
+            max_logp=float(logp_high),
+            min_aromatic_rings=min_aromatic,
+            min_hbd=int(profile["preferred_hbd"]),
+            min_hba=min_hba,
+            max_rotatable_bonds=max_rotatable,
+            min_quick_binding_score=min_quick_binding,
+            preferred_fragments=TARGET_CLASS_FALLBACK_SEEDS.get(target_class, TARGET_CLASS_FALLBACK_SEEDS["generic"]),
+        )
+
+    @staticmethod
     def _descriptor_bundle(mol: Chem.Mol) -> Dict[str, Any]:
         """Return target-screening descriptors used before expensive docking."""
         return {
@@ -207,6 +287,46 @@ class MoleculeGenerationService:
             "tpsa": round(float(Descriptors.TPSA(mol)), 2),
             "heavy_atoms": int(mol.GetNumHeavyAtoms()),
         }
+
+    @staticmethod
+    def compute_properties_from_smiles(smiles: str) -> Dict[str, Any]:
+        """
+        Computes molecular properties from SMILES using RDKit.
+        Returns dict with mw, logp, hbd, hba, tpsa, rotatable_bonds.
+        Returns None values if SMILES is invalid.
+        """
+        try:
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                return {
+                    "mw": None,
+                    "logp": None,
+                    "hbd": None,
+                    "hba": None,
+                    "tpsa": None,
+                    "rotatable_bonds": None,
+                    "smiles_valid": False,
+                }
+            return {
+                "mw": round(float(Descriptors.MolWt(mol)), 2),
+                "logp": round(float(Descriptors.MolLogP(mol)), 2),
+                "hbd": int(Descriptors.NumHDonors(mol)),
+                "hba": int(Descriptors.NumHAcceptors(mol)),
+                "tpsa": round(float(Descriptors.TPSA(mol)), 2),
+                "rotatable_bonds": int(Descriptors.NumRotatableBonds(mol)),
+                "smiles_valid": True,
+            }
+        except Exception as exc:
+            logger.warning("RDKit property computation failed for %s: %s", smiles, exc)
+            return {
+                "mw": None,
+                "logp": None,
+                "hbd": None,
+                "hba": None,
+                "tpsa": None,
+                "rotatable_bonds": None,
+                "smiles_valid": False,
+            }
 
     @staticmethod
     def _reactive_group_hits(mol: Chem.Mol) -> List[str]:
@@ -360,6 +480,7 @@ class MoleculeGenerationService:
         smiles: str,
         source: Optional[str] = None,
         source_id: Optional[str] = None,
+        computed_properties: Optional[Dict[str, Any]] = None,
         target_profile: Optional[TargetGenerationProfile] = None,
         require_target_prefilter: bool = False,
         max_lipinski_violations: int = 2,
@@ -370,7 +491,12 @@ class MoleculeGenerationService:
         if mol is None or canonical_smiles is None:
             return None
 
-        lipinski_data = MoleculeGenerationService.calculate_lipinski_descriptors(mol)
+        rdkit_properties = computed_properties or MoleculeGenerationService.compute_properties_from_smiles(canonical_smiles)
+        if not rdkit_properties.get("smiles_valid"):
+            logger.warning("Skipping molecule with invalid SMILES after sanitization: %s", canonical_smiles)
+            return None
+
+        lipinski_data = MoleculeGenerationService.calculate_lipinski_descriptors(mol, rdkit_properties)
         if lipinski_data["lipinski_violations"] > max_lipinski_violations:
             logger.info(
                 "Discarding non-Lipinski molecule %s (violations=%s)",
@@ -399,6 +525,9 @@ class MoleculeGenerationService:
             'hbd': lipinski_data['hbd'],
             'hba': lipinski_data['hba'],
             'logp': lipinski_data['logp'],
+            'tpsa': rdkit_properties['tpsa'],
+            'rotatable_bonds': rdkit_properties['rotatable_bonds'],
+            'smiles_valid': rdkit_properties['smiles_valid'],
             'lipinski_violations': lipinski_data['lipinski_violations'],
             **target_metadata,
         }
@@ -410,6 +539,11 @@ class MoleculeGenerationService:
         return Molecule(
             target_id=target_id,
             smiles=canonical_smiles,
+            molecular_weight=lipinski_data['molecular_weight'],
+            logp=lipinski_data['logp'],
+            tpsa=rdkit_properties['tpsa'],
+            rotatable_bonds=rdkit_properties['rotatable_bonds'],
+            smiles_valid=bool(rdkit_properties['smiles_valid']),
             lipinski_pass=lipinski_data['lipinski_pass'],
             sas_score=sas,
             admet_scores=admet_scores,
@@ -601,6 +735,7 @@ class MoleculeGenerationService:
         target_chembl_id: str,
         gene_symbol: str,
         limit: int,
+        allow_target_fallback_ids: bool = True,
     ) -> List[Dict[str, str]]:
         """Fetch distinct active compounds for a ChEMBL target with a low-signal fallback search."""
         activity_url = f"{settings.CHEMBL_API_BASE}/activity.json"
@@ -615,7 +750,7 @@ class MoleculeGenerationService:
                 limit,
             )
             combined_activities = list(primary_activities)
-            if len(primary_activities) < 10:
+            if allow_target_fallback_ids and len(primary_activities) < 10:
                 fallback_ids = await MoleculeGenerationService._lookup_fallback_chembl_target_ids(client, gene_symbol)
                 for fallback_id in fallback_ids:
                     if fallback_id in target_ids:
@@ -660,16 +795,27 @@ class MoleculeGenerationService:
                 if len(ordered_ids) >= limit * 3:
                     break
 
-            async def fetch_molecule(molecule_chembl_id: str) -> Optional[Dict[str, str]]:
+            async def fetch_molecule(molecule_chembl_id: str) -> Optional[Dict[str, Any]]:
                 molecule_response = await client.get(f"{molecule_base_url}/{molecule_chembl_id}.json")
                 molecule_response.raise_for_status()
                 molecule_data = molecule_response.json()
+                smiles = (molecule_data.get("molecule_structures") or {}).get("canonical_smiles")
+                if not smiles:
+                    return None
+
+                computed_properties = MoleculeGenerationService.compute_properties_from_smiles(smiles)
+                if not computed_properties["smiles_valid"]:
+                    logger.warning("Skipping ChEMBL molecule %s due to invalid SMILES", molecule_chembl_id)
+                    return None
+
                 molecule_properties = molecule_data.get("molecule_properties") or {}
-                molecular_weight = (
-                    molecule_properties.get("full_mwt")
-                    or molecule_properties.get("mw_freebase")
-                    or molecule_properties.get("molecular_weight")
-                )
+                molecular_weight = computed_properties["mw"]
+                if molecular_weight is None:
+                    molecular_weight = (
+                        molecule_properties.get("full_mwt")
+                        or molecule_properties.get("mw_freebase")
+                        or molecule_properties.get("molecular_weight")
+                    )
                 try:
                     if molecular_weight not in (None, "") and float(molecular_weight) > 500:
                         logger.info(
@@ -680,13 +826,11 @@ class MoleculeGenerationService:
                         return None
                 except (TypeError, ValueError):
                     pass
-                smiles = (molecule_data.get("molecule_structures") or {}).get("canonical_smiles")
-                if not smiles:
-                    return None
                 return {
                     "chembl_id": molecule_chembl_id,
                     "smiles": smiles,
                     "pref_name": molecule_data.get("pref_name") or "",
+                    "computed_properties": computed_properties,
                 }
 
             molecule_results = await asyncio.gather(
@@ -808,6 +952,7 @@ class MoleculeGenerationService:
                 smiles=compound["smiles"],
                 source=source_label,
                 source_id=compound.get("chembl_id"),
+                computed_properties=compound.get("computed_properties"),
                 max_lipinski_violations=max_lipinski_violations,
                 enforce_reactive_filter=False,
             )
@@ -820,24 +965,21 @@ class MoleculeGenerationService:
         return candidates
 
     @staticmethod
-    def _emergency_fallback_smiles(target_name: str) -> Tuple[str, ...]:
+    def _emergency_fallback_smiles(target_class: str) -> Tuple[str, ...]:
         """Return emergency seed SMILES when ChEMBL produces no viable small molecules."""
-        target_text = (target_name or "").lower()
-        if "egfr" in target_text or "epidermal growth factor receptor" in target_text:
-            return EGFR_EMERGENCY_SEEDS
-        return GENERIC_EMERGENCY_SEEDS
+        return TARGET_CLASS_FALLBACK_SEEDS.get(target_class, TARGET_CLASS_FALLBACK_SEEDS["generic"])
 
     @staticmethod
     def _build_emergency_fallback_candidates(
         target_id: str,
-        target_name: str,
+        target_class: str,
         target_profile: Optional[TargetGenerationProfile],
         desired_count: int,
     ) -> List[Molecule]:
         """Generate emergency fallback analogs from a tiny curated seed library."""
         candidates: List[Molecule] = []
         seen_smiles: set[str] = set()
-        seeds = MoleculeGenerationService._emergency_fallback_smiles(target_name)
+        seeds = MoleculeGenerationService._emergency_fallback_smiles(target_class)
 
         for seed_smiles in seeds:
             try:
@@ -1180,7 +1322,10 @@ class MoleculeGenerationService:
         return Chem.MolToSmiles(variant_mol)
     
     @staticmethod
-    def calculate_lipinski_descriptors(mol: Chem.Mol) -> Dict[str, Any]:
+    def calculate_lipinski_descriptors(
+        mol: Chem.Mol,
+        computed_properties: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
         Calculate Lipinski Rule of Five descriptors.
         
@@ -1194,10 +1339,14 @@ class MoleculeGenerationService:
             }
         """
         try:
-            mw = rdMolDescriptors.CalcExactMolWt(mol)
-            hbd = Descriptors.NumHDonors(mol)
-            hba = Descriptors.NumHAcceptors(mol)
-            logp = Descriptors.MolLogP(mol)
+            properties = computed_properties or MoleculeGenerationService.compute_properties_from_smiles(Chem.MolToSmiles(mol))
+            if not properties.get("smiles_valid"):
+                raise ValueError("Invalid SMILES supplied for Lipinski calculation")
+
+            mw = float(properties["mw"])
+            hbd = int(properties["hbd"])
+            hba = int(properties["hba"])
+            logp = float(properties["logp"])
             
             violations = sum([
                 mw > 500,
@@ -1335,18 +1484,88 @@ class MoleculeGenerationService:
         return saved_molecules, valid_count
 
     @staticmethod
+    async def generate_molecules(
+        target_context: TargetContext,
+        db: Session,
+        seed_smiles: str | None = None,
+        n_molecules: int = 20,
+    ) -> Tuple[List[Molecule], int]:
+        """Generate or fetch molecules using a single immutable target context."""
+        dynamic_profile = build_target_profile(target_context)
+        target_profile = MoleculeGenerationService._profile_for_target_context(target_context)
+
+        if seed_smiles:
+            try:
+                variant_smiles_list = MoleculeGenerationService.generate_target_aware_variants(
+                    seed_smiles,
+                    n_molecules,
+                    target_profile,
+                )
+            except Exception as exc:
+                logger.error("Variant generation failed for %s: %s", target_context.target_id, exc)
+                raise ValueError(f"Failed to generate variants: {exc}") from exc
+
+            molecules: List[Molecule] = []
+            for smiles in variant_smiles_list:
+                try:
+                    molecule = MoleculeGenerationService._build_molecule_record(
+                        target_id=target_context.target_id,
+                        smiles=smiles,
+                        source="target_aware_generated" if target_profile else "rdkit_generated",
+                        target_profile=target_profile,
+                        require_target_prefilter=target_profile is not None,
+                    )
+                    if molecule is not None:
+                        molecules.append(molecule)
+                except Exception as exc:
+                    logger.warning("Error processing SMILES %s for %s: %s", smiles, target_context.target_id, exc)
+
+            saved_molecules, valid_count = MoleculeGenerationService._persist_unique_molecules(
+                target_context.target_id,
+                db,
+                molecules,
+            )
+            if target_profile and not saved_molecules:
+                raise ValueError(
+                    f"No generated molecules matched the {target_profile.key} pharmacophore, early ADMET, and quick-binding filters"
+                )
+            return saved_molecules, valid_count
+
+        molecules, valid_count = await MoleculeGenerationService.fetch_known_molecules_for_target(
+            target_id=target_context.target_id,
+            target_name=target_context.protein_name,
+            target_chembl_id=target_context.chembl_id or None,
+            n_molecules=n_molecules,
+            db=db,
+            target_context=target_context,
+        )
+        if not molecules:
+            raise ValueError(
+                f"No molecules generated for target class {dynamic_profile['target_class']} using canonical ChEMBL target {target_context.chembl_id or 'N/A'}"
+            )
+        return molecules, valid_count
+
+    @staticmethod
     async def fetch_known_molecules_for_target(
         target_id: str,
         target_name: str,
         target_chembl_id: Optional[str],
         n_molecules: int,
         db: Session,
+        target_context: TargetContext | None = None,
     ) -> Tuple[List[Molecule], int]:
         """Fetch known bioactive molecules for a target from ChEMBL instead of generating variants."""
-        target = db.query(Target).filter(Target.id == target_id).first()
-        if not target:
-            raise ValueError(f"Target {target_id} not found")
-        target_profile = MoleculeGenerationService._profile_for_target(target)
+        if target_context is not None:
+            profile_dict = build_target_profile(target_context)
+            target_profile = MoleculeGenerationService._profile_for_target_context(target_context)
+            target_class = profile_dict["target_class"]
+            target_chembl_id = target_context.chembl_id or None
+        else:
+            target = db.query(Target).filter(Target.id == target_id).first()
+            if not target:
+                raise ValueError(f"Target {target_id} not found")
+            target_profile = MoleculeGenerationService._profile_for_target(target)
+            target_class = "generic"
 
         compounds: List[Dict[str, str]] = []
         fetch_limit = max(200, n_molecules * 6)
@@ -1356,6 +1575,7 @@ class MoleculeGenerationService:
                     target_chembl_id,
                     MoleculeGenerationService._infer_gene_symbol(target_name),
                     fetch_limit,
+                    allow_target_fallback_ids=target_context is None,
                 )
             except Exception as exc:
                 logger.error("Failed to fetch ChEMBL compounds for %s: %s", target_chembl_id, exc)
@@ -1422,7 +1642,7 @@ class MoleculeGenerationService:
         if not saved_molecules:
             relaxed_candidates = MoleculeGenerationService._build_emergency_fallback_candidates(
                 target_id,
-                target_name,
+                target_class,
                 target_profile,
                 max(n_molecules, 10),
             )

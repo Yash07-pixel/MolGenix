@@ -200,16 +200,19 @@ function TargetPage() {
         <div className="target-stat">
           <strong>{isLoading ? <Skeleton width={60} height={20} /> : target?.known_inhibitors ?? '-'}</strong>
           <span>Known Inhibitors</span>
+          <em className="target-stat__trend">Evidence density</em>
         </div>
         <div className="target-stat__divider" />
         <div className="target-stat">
           <strong>{isLoading ? <Skeleton width={60} height={20} /> : molecules.length}</strong>
           <span>Molecules Generated</span>
+          <em className="target-stat__trend">Current run output</em>
         </div>
         <div className="target-stat__divider" />
         <div className="target-stat">
           <strong>{isLoading ? <Skeleton width={60} height={20} /> : bestDockingScore ?? '-'}</strong>
           <span>Best Docking Score</span>
+          <em className="target-stat__trend">Lead affinity signal</em>
         </div>
       </section>
 

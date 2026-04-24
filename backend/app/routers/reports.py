@@ -42,7 +42,7 @@ async def generate_report(
 ) -> GenerateReportResponse:
     """Generate and persist a PDF report for a target."""
     try:
-        result = await ReportService.generate_report(
+        result = await ReportService.generate_report_for_target(
             str(request.target_id),
             db,
             molecule_ids=[str(molecule_id) for molecule_id in request.molecule_ids] or None,
@@ -71,13 +71,12 @@ async def download_report(
         if not report:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report not found")
 
-        pdf_path = report.pdf_path
-        if not pdf_path:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file not found")
-
-        file_path = Path(pdf_path)
+        file_path = Path(report.pdf_path) if report.pdf_path else (ReportService.REPORT_STORAGE_DIR / f"{report.id}.pdf")
         if not file_path.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report file not found")
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Report expired. Please regenerate.",
+            )
 
         return FileResponse(
             path=file_path,

@@ -33,6 +33,7 @@ RUN set -eux; \
 
 COPY backend/requirements.txt ./requirements.txt
 RUN python -m pip install --upgrade pip && pip install -r requirements.txt
+RUN mkdir -p /app/reports
 
 COPY backend/ ./
 

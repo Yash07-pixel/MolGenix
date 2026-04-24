@@ -8,7 +8,6 @@ const navItems = [
 
 function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
-  const docsUrl = `${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/docs`
 
   return (
     <header className="navbar-shell">
@@ -29,14 +28,6 @@ function Navbar() {
               {item.label}
             </NavLink>
           ))}
-          <a
-            className="navbar__link"
-            href={docsUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Docs
-          </a>
         </nav>
 
         <div className="navbar__actions">
@@ -66,19 +57,10 @@ function Navbar() {
                 className="navbar__mobile-link"
                 to={item.to}
                 onClick={() => setMenuOpen(false)}
-              >
-                {item.label}
-              </NavLink>
-            ))}
-            <a
-              className="navbar__mobile-link"
-              href={docsUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => setMenuOpen(false)}
             >
-              Docs
-            </a>
+              {item.label}
+            </NavLink>
+            ))}
           </div>
         </div>
       ) : null}

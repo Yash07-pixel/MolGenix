@@ -31,6 +31,7 @@ class TargetResponse(TargetBase):
     id: UUID
     created_at: datetime
     chembl_id: Optional[str] = None
+    target_class: Optional[str] = None
     disease: Optional[str] = None
     known_inhibitors: Optional[int] = None
     structure_count: Optional[int] = None

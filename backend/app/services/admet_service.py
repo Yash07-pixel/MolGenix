@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+from app.models.target_context import TargetContext
 
 try:
     from rdkit import Chem
@@ -451,6 +452,26 @@ class ADMETService:
                 logger.error(f"Failed to predict ADMET for {mol_id}: {exc}")
                 db.rollback()
                 continue
+
+        return results
+
+    @staticmethod
+    async def score_molecules(
+        target_context: TargetContext,
+        molecules: List[Any],
+        db: Any,
+    ) -> List[Dict[str, Any]]:
+        """Score molecules with ADMET while keeping a shared target context attached."""
+        molecule_ids = [str(molecule.id) for molecule in molecules]
+        results = await ADMETService.predict_admet_for_molecules(
+            molecule_ids=molecule_ids,
+            db=db,
+        )
+
+        for result in results:
+            admet = result.get("admet", {})
+            admet["target_context_id"] = target_context.target_id
+            admet["target_gene_symbol"] = target_context.gene_symbol
 
         return results
 

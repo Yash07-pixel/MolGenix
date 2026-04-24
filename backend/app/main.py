@@ -13,6 +13,7 @@ from app.database import get_db, init_db, engine
 from sqlalchemy.orm import Session
 from app.routers import targets_router, molecules_router, admet_router, docking_router, optimization_router, reports_router
 from app.models.target import Target
+from app.models.target_context import TargetContext
 from app.services.admet_service import ADMETService
 from app.services.docking_service import DockingService
 from app.services.molecule_service import MoleculeGenerationService
@@ -182,6 +183,7 @@ def _serialize_target(target: Any) -> Dict[str, Any]:
         "uniprot_id": target.uniprot_id,
         "druggability_score": target.druggability_score,
         "chembl_id": getattr(target, "chembl_id", None),
+        "target_class": getattr(target, "target_class", None),
         "disease": getattr(target, "disease", None),
         "known_inhibitors": getattr(target, "known_inhibitors", None),
         "structure_count": getattr(target, "structure_count", None),
@@ -192,6 +194,48 @@ def _serialize_target(target: Any) -> Dict[str, Any]:
         "pipeline_error": getattr(target, "pipeline_error", None),
         "created_at": target.created_at.isoformat(),
     }
+
+
+def _coerce_known_inhibitors(value: Any) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, dict):
+        for key in ("count", "total", "known_inhibitors"):
+            nested = value.get(key)
+            if isinstance(nested, (int, float)):
+                return int(nested)
+    return 0
+
+
+def _build_target_context(target: Target, query: str) -> TargetContext:
+    inferred = TargetEnrichmentService.infer_target_info_from_query(query)
+    gene_symbol = (
+        getattr(target, "gene_symbol", None)
+        or inferred.get("gene_symbol")
+        or target.name
+    )
+    receptor_filename = _find_default_pdb_filename(target=target, query=query)
+    receptor_pdb_path = str(Path(settings.PDB_STORAGE_PATH) / receptor_filename) if receptor_filename else None
+    return TargetContext(
+        target_id=str(target.id),
+        gene_symbol=str(gene_symbol or ""),
+        protein_name=str(target.name or inferred.get("protein_name") or gene_symbol or ""),
+        disease=str(getattr(target, "disease", None) or inferred.get("disease") or ""),
+        uniprot_id=str(getattr(target, "uniprot_id", None) or ""),
+        chembl_id=str(getattr(target, "chembl_id", None) or ""),
+        pdb_id=str(getattr(target, "pdb_id", None) or (Path(receptor_filename).stem.upper() if receptor_filename else "")),
+        function=str(getattr(target, "function", None) or ""),
+        known_inhibitors=_coerce_known_inhibitors(getattr(target, "known_inhibitors", None)),
+        druggability_score=float(getattr(target, "druggability_score", None) or 0.0),
+        target_class=str(getattr(target, "target_class", None) or "other"),
+        receptor_pdb_path=receptor_pdb_path,
+        docking_center=None,
+        docking_box_size=(DockingService.BOX_SIZE, DockingService.BOX_SIZE, DockingService.BOX_SIZE),
+    )
 
 
 def _set_pipeline_status(
@@ -238,101 +282,136 @@ async def run_pipeline(
     db: Session = Depends(get_db),
 ):
     target: Target | None = None
+    # FIXED
+    target_context: TargetContext | None = None
     try:
-        target = await TargetEnrichmentService.analyze_target(request.query, db)
-        _set_pipeline_status(db, target, pipeline_complete=False, pipeline_error=None)
+        # FIXED
+        analyzed_target = await TargetEnrichmentService.analyze_target(request.query, db)
+        # FIXED
+        target = db.query(Target).filter(Target.id == analyzed_target.id).first()
+        # FIXED
+        if not target:
+            # FIXED
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
 
-        if request.seed_smiles:
-            molecules, _valid_count = await MoleculeGenerationService.generate_molecules_for_target(
-                target_id=str(target.id),
-                seed_smiles=request.seed_smiles,
-                n_molecules=request.n_molecules,
-                db=db,
-            )
+        # FIXED
+        gene_symbol = getattr(target, "gene_symbol", None) or ((target.name or "").split()[0].upper() if target.name else "")
+        # FIXED
+        known_inhibitors = getattr(target, "known_inhibitors", None) or []
+        # FIXED
+        if isinstance(known_inhibitors, int):
+            # FIXED
+            known_inhibitor_count = known_inhibitors
+        # FIXED
+        elif isinstance(known_inhibitors, dict):
+            # FIXED
+            known_inhibitor_count = len(known_inhibitors)
+        # FIXED
         else:
-            molecules, _valid_count = await MoleculeGenerationService.fetch_known_molecules_for_target(
-                target_id=str(target.id),
-                target_name=target.name,
-                target_chembl_id=getattr(target, "chembl_id", None),
-                n_molecules=request.n_molecules,
-                db=db,
-            )
+            # FIXED
+            known_inhibitor_count = len(known_inhibitors)
+
+        # FIXED
+        target_context = TargetContext(
+            target_id=str(target.id),
+            gene_symbol=gene_symbol or "",
+            protein_name=target.name,
+            disease=target.disease or "",
+            uniprot_id=target.uniprot_id or "",
+            chembl_id=target.chembl_id or "",
+            pdb_id=target.pdb_id or "",
+            function=target.function or "",
+            known_inhibitors=known_inhibitor_count,
+            druggability_score=target.druggability_score or 0.0,
+        )
+
+        # FIXED
+        target.pipeline_complete = False
+        # FIXED
+        target.pipeline_error = None
+        # FIXED
+        db.add(target)
+        # FIXED
+        db.commit()
+        # FIXED
+        db.refresh(target)
+
+        # FIXED
+        molecules, _valid_count = await MoleculeGenerationService.generate_molecules(
+            target_context,
+            db,
+            seed_smiles=request.seed_smiles,
+            n_molecules=request.n_molecules,
+        )
+        # FIXED
         if not molecules:
+            # FIXED
             raise ValueError("No molecules generated")
 
-        admet_results = await ADMETService.predict_admet_for_molecules(
-            molecule_ids=[str(molecule.id) for molecule in molecules],
-            db=db,
+        # FIXED
+        admet_results = await ADMETService.score_molecules(
+            target_context,
+            molecules,
+            db,
         )
-        admet_by_id = {result["molecule_id"]: result["admet"] for result in admet_results}
+        # FIXED
+        docking_results = await DockingService.dock_molecules(
+            target_context,
+            molecules,
+            db,
+        )
 
-        pdb_filename = _find_default_pdb_filename(target=target, query=request.query)
+        # FIXED
         molecules_by_weight = sorted(molecules, key=_molecule_weight)
-        real_docking_molecules = molecules_by_weight[: min(5, len(molecules_by_weight))]
-        fallback_only_molecules = molecules_by_weight[min(5, len(molecules_by_weight)) :]
-        docking_results: List[Dict[str, Any]] = []
-        for molecule in real_docking_molecules:
-            if pdb_filename:
-                docking_results.append(await DockingService.run_docking(str(molecule.id), pdb_filename, db))
-            else:
-                fallback_result = DockingService._fallback_result(molecule.smiles, "pdb_missing")
-                DockingService._persist_score(db, molecule, fallback_result, "mock")
-                docking_results.append(
-                    {
-                        "molecule_id": str(molecule.id),
-                        **fallback_result,
-                        "pdb_filename": "mock",
-                    }
-                )
-
-        for molecule in fallback_only_molecules:
-            fallback_result = DockingService._fallback_result(molecule.smiles, "pipeline_docking_cap")
-            DockingService._persist_score(db, molecule, fallback_result, "mock")
-            docking_results.append(
-                {
-                    "molecule_id": str(molecule.id),
-                    **fallback_result,
-                    "pdb_filename": "mock",
-                }
-            )
-
+        # FIXED
         best_molecule_id = (
             min(docking_results, key=lambda result: result["docking_score"])["molecule_id"]
             if docking_results
             else str(molecules_by_weight[0].id)
         )
-        optimized_result = await OptimizationService.optimize_molecule(best_molecule_id, db)
-        report_result = await ReportService.generate_report(
-            str(target.id),
-            db,
-            target_context=target,
-            molecule_ids=[str(molecule.id) for molecule in molecules],
-        )
+        # FIXED
+        optimization = await OptimizationService.optimize_molecule(best_molecule_id, db)
+        # FIXED
+        report = await ReportService.generate_report(target_context, molecules, db)
 
-        scored_molecules = [
-            _serialize_molecule(
-                molecule,
-                admet_by_id.get(str(molecule.id), molecule.admet_scores or {}),
-            )
-            for molecule in molecules
-        ]
-        top_five = sorted(scored_molecules, key=lambda molecule: molecule["combined_score"], reverse=True)[:5]
-        _set_pipeline_status(db, target, pipeline_complete=True, pipeline_error=None)
+        # FIXED
+        target.pipeline_complete = True
+        # FIXED
+        target.pipeline_error = None
+        # FIXED
+        db.add(target)
+        # FIXED
+        db.commit()
+        # FIXED
+        db.refresh(target)
 
+        # FIXED
         return {
-            "target": _serialize_target(target),
-            "molecules": top_five,
-            "admet_results": admet_results,
+            "status": "success",
+            "target_id": str(target.id),
+            "molecules": [str(molecule.id) for molecule in molecules],
             "docking_results": docking_results,
-            "optimized_lead": optimized_result["optimized"],
-            "report_url": report_result["pdf_url"],
+            "report_id": report.get("report_id"),
+            "receptor_used": target_context.receptor_pdb_path,
+            "is_mock_docking": target_context.receptor_pdb_path is None,
+            "optimized_lead": optimization.get("optimized"),
+            "admet_results": admet_results,
         }
     except Exception as exc:
         logger.error("Pipeline execution failed: %s", exc)
         if target is not None:
             try:
                 db.rollback()
-                _set_pipeline_status(db, target, pipeline_complete=False, pipeline_error=str(exc))
+                # FIXED
+                target.pipeline_complete = False
+                # FIXED
+                target.pipeline_error = str(exc)
+                # FIXED
+                db.add(target)
+                # FIXED
+                db.commit()
+                # FIXED
+                db.refresh(target)
             except Exception as status_exc:
                 logger.error("Failed to persist pipeline error status: %s", status_exc)
         raise HTTPException(

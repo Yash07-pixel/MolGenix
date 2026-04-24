@@ -67,19 +67,36 @@ function LandingPage() {
           </p>
           <div className="landing-actions">
             <Link to="/search">
-              <Button size="md">Start a Search</Button>
-            </Link>
-            <Link to="/search?demo=true">
-              <Button size="md" variant="secondary">
-                Load Demo
-              </Button>
+              <Button size="lg">Start a Search</Button>
             </Link>
           </div>
+          <p className="landing-cta-note">
+            Run a full discovery pass with target enrichment, ADMET screening, docking,
+            and a polished report from one prompt.
+          </p>
         </div>
 
-        <Card className="preview-card">
+        <Card className="preview-card preview-card--hero">
           <p className="landing-section-label landing-section-label--tight">Example Output</p>
           <div className="preview-card__body">
+            <div className="preview-visual" aria-hidden="true">
+              <div className="preview-visual__halo" />
+              <div className="preview-visual__grid" />
+              <div className="preview-visual__molecule">
+                <span className="preview-visual__node preview-visual__node--a" />
+                <span className="preview-visual__node preview-visual__node--b" />
+                <span className="preview-visual__node preview-visual__node--c" />
+                <span className="preview-visual__node preview-visual__node--d" />
+                <span className="preview-visual__bond preview-visual__bond--ab" />
+                <span className="preview-visual__bond preview-visual__bond--bc" />
+                <span className="preview-visual__bond preview-visual__bond--cd" />
+              </div>
+              <div className="preview-visual__chips">
+                <span>Docking Active</span>
+                <span>ADMET Screened</span>
+                <span>Lead Ranked</span>
+              </div>
+            </div>
             <div className="preview-card__top">
               <span className="preview-card__compound">Compound 001</span>
               <Badge variant="success">Lipinski Pass</Badge>
