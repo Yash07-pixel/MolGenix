@@ -754,24 +754,6 @@ class ReportService:
     def _build_pdf(target_context: TargetContext, target: Any, molecules: List[Any], output: Any) -> None:
         styles = ReportService._styles()
         summary = ReportService.build_target_description(target_context)
-        # FIXED
-        docking_meta = next(
-            (
-                (molecule.admet_scores or {}).get("_docking", {})
-                for molecule in molecules
-                if isinstance((molecule.admet_scores or {}).get("_docking", {}), dict)
-            ),
-            {},
-        )
-        # FIXED
-        optimized_molecule = next((molecule for molecule in molecules if getattr(molecule, "is_optimized", False)), None)
-        # FIXED
-        optimization_result = {
-            "changes": list(getattr(optimized_molecule, "optimization_changes", []) or [])
-        } if optimized_molecule is not None else {}
-        # FIXED
-        confidence = ReportService.build_confidence_assessment(target_context, docking_meta, molecules, optimization_result)
-
         doc = SimpleDocTemplate(output, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
         story: List[Any] = []
 
@@ -798,13 +780,6 @@ class ReportService:
                 Paragraph("Computational Methods & Confidence", styles["MolHeading"]),
                 ReportService._methods_confidence_table(target_context, molecules),
                 Spacer(1, 0.2 * inch),
-                # FIXED
-                Paragraph("Computational Confidence", styles["MolHeading"]),
-                # FIXED
-                Paragraph(confidence["label"], styles["MolBody"]),
-                # FIXED
-                ReportService._confidence_bar(confidence["score"]),
-                Spacer(1, 0.12 * inch),
                 Paragraph("Evidence and Model Sources", styles["MolHeading"]),
                 ReportService._provenance_table(target, molecules),
                 Spacer(1, 0.2 * inch),
@@ -819,18 +794,9 @@ class ReportService:
                     ]
                 ),
                 Spacer(1, 0.18 * inch),
-                # FIXED
-                Paragraph("Confidence Flags", styles["MolHeading"]),
             ]
         )
 
-        # FIXED
-        for flag in confidence["flags"]:
-            story.append(Paragraph(f"&bull; {html.escape(flag)}", styles["MolBody"]))
-
-        # FIXED
-        story.append(Spacer(1, 0.15 * inch))
-        # FIXED
         story.append(Paragraph(STANDARD_DISCLAIMER, styles["MolSmall"]))
 
         story.extend(ReportService._molecule_rows(target, molecules))
