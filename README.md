@@ -214,3 +214,4 @@ For questions or contributions, reach out to the MolGenix team.
 ---
 
 **Status:** ✅ Backend scaffold complete and verified. Ready for module implementation.
+### Made in India
